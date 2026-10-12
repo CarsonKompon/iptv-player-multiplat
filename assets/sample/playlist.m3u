@@ -1,0 +1,13 @@
+#EXTM3U
+#EXTINF:-1 tvg-id="demo.bbb" tvg-chno="170" group-title="Movies",BUNNY HD
+https://test-streams.mux.dev/x36xhzz/x36xhzz.m3u8
+#EXTINF:-1 tvg-id="demo.sintel" tvg-chno="171" group-title="Movies",SINTEL
+https://bitdash-a.akamaihd.net/content/sintel/hls/playlist.m3u8
+#EXTINF:-1 tvg-id="demo.tos" tvg-chno="172" group-title="Movies",STEEL
+https://demo.unified-streaming.com/k8s/features/stable/video/tears-of-steel/tears-of-steel.ism/.m3u8
+#EXTINF:-1 tvg-id="demo.bipbop" tvg-chno="173" group-title="Test",BIPBOP
+https://devstreaming-cdn.apple.com/videos/streaming/examples/img_bipbop_adv_example_fmp4/master.m3u8
+#EXTINF:-1 tvg-id="demo.live" tvg-chno="174" group-title="Test",LIVE1 HD
+https://cph-p2p-msl.akamaized.net/hls/live/2000341/test/master.m3u8
+#EXTINF:-1 tvg-id="demo.mi" tvg-chno="175" group-title="Test",TEST2
+https://bitdash-a.akamaihd.net/content/MI201109210084_1/m3u8s/f08e80da-bf1d-4e3d-8899-f0f6155f6efa.m3u8

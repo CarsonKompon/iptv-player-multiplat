@@ -1,0 +1,32 @@
+name: iptv_guide
+description: Retro satellite-style IPTV player with a classic program guide.
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: '>=3.4.0 <4.0.0'
+  flutter: '>=3.24.0'
+
+dependencies:
+  flutter:
+    sdk: flutter
+  media_kit: ^1.1.11
+  media_kit_video: ^1.2.5
+  media_kit_libs_video: ^1.0.5
+  http: ^1.2.2
+  shared_preferences: ^2.3.2
+  path_provider: ^2.1.4
+  archive: ^3.6.1
+  google_fonts: ^6.2.1
+  gamepads: ^0.1.1
+  window_manager: ^0.4.2
+  wakelock_plus: ^1.2.8
+
+dev_dependencies:
+  flutter_lints: ^4.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/config.json
+    - assets/sample/

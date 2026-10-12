@@ -1,0 +1,7 @@
+{
+  "playlistUrl": "",
+  "epgUrl": "",
+  "epgHours": 24,
+  "rewriteTsToHls": false,
+  "firstChannelNumber": 1
+}

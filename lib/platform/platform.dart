@@ -1,0 +1,2 @@
+// Platform helpers: window/fullscreen, exit. Web gets a stub.
+export 'platform_stub.dart' if (dart.library.io) 'platform_io.dart';
