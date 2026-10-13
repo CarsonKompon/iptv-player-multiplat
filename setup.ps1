@@ -19,7 +19,7 @@ if (-not (Get-Command flutter -ErrorAction SilentlyContinue)) {
 
 # Flutter plugins on Windows need symlinks, which require Developer Mode.
 $devMode = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock' -ErrorAction SilentlyContinue).AllowDevelopmentWithoutDevLicense
-if ($devMode -ne 1) {
+if ($devMode -ne 1 -and -not $env:CI) {
     Write-Host 'Windows Developer Mode is OFF - Flutter needs it to build apps with plugins.' -ForegroundColor Yellow
     Write-Host 'Opening Settings: turn on "Developer Mode", then run flutter again.' -ForegroundColor Yellow
     Start-Process 'ms-settings:developers'

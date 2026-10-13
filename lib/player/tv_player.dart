@@ -13,9 +13,15 @@ enum TuneStatus { idle, tuning, playing, failed }
 /// Wraps a single media_kit (libmpv) player: tuning, first-frame detection,
 /// retries and tune-time measurement.
 class TvPlayer {
-  TvPlayer() {
+  /// [hwAccel] false = software video output (no GPU texture interop). Fixes
+  /// rendering artifacts (e.g. a diagonal seam) on some GPU / driver combos.
+  TvPlayer({bool hwAccel = true}) {
     player = Player(configuration: const PlayerConfiguration(logLevel: MPVLogLevel.info));
-    controller = VideoController(player);
+    controller = VideoController(
+      player,
+      configuration: VideoControllerConfiguration(enableHardwareAcceleration: hwAccel),
+    );
+    debugPrint('[player] hardware acceleration: $hwAccel');
     // mpv log -> `flutter run` console, and the last few lines are kept so the
     // tuning box can show what's going on when a channel won't start.
     _subs.add(player.stream.log.listen((l) {
@@ -219,10 +225,12 @@ class TvPlayer {
 
   /// Player position on the stream's own clock (see HlsSubtitles).
   Future<void> _configure() async {
+    if (kIsWeb) return; // browser playback has no mpv properties
     try {
       final p = player.platform;
       if (p is NativePlayer) {
-        await p.setProperty('rebase-start-time', 'no');
+        // (dynamic: on web media_kit compiles a NativePlayer stub without setProperty)
+        await (p as dynamic).setProperty('rebase-start-time', 'no');
         debugPrint('[player] rebase-start-time=no');
       }
     } catch (e) {
@@ -374,12 +382,65 @@ class TvPlayer {
     }
   }
 
+  // ------------------------------------------------------------------ output size
+
+  int _outW = 0;
+  int _outH = 0;
+  int _wantW = 0;
+  int _wantH = 0;
+  Timer? _sizeTimer;
+
+  /// Asks libmpv to render frames at exactly [w]x[h] physical pixels (the
+  /// video's on-screen size), so Flutter draws the texture 1:1 instead of
+  /// scaling it - scaling a texture by odd factors shows a diagonal seam
+  /// between its two triangles. Debounced, so animations and window drags
+  /// don't trigger a resize every frame.
+  void requestOutputSize(int w, int h) {
+    if (w <= 0 || h <= 0) return;
+    // even dimensions: some video paths mis-handle odd sizes (e.g. 1210x681)
+    w += w.isOdd ? 1 : 0;
+    h += h.isOdd ? 1 : 0;
+    if (w == _wantW && h == _wantH) return;
+    _wantW = w;
+    _wantH = h;
+    _sizeTimer?.cancel();
+    _sizeTimer = Timer(const Duration(milliseconds: 300), () async {
+      if (_wantW == _outW && _wantH == _outH) return;
+      _outW = _wantW;
+      _outH = _wantH;
+      try {
+        await controller.setSize(width: _outW, height: _outH);
+        debugPrint('[player] video output ${_outW}x$_outH');
+      } catch (e) {
+        debugPrint('[player] could not set output size: $e');
+      }
+    });
+  }
+
+  /// Stops everything that talks to the server (stream, subtitle poller,
+  /// retries) so it can close its session right away. Used on app exit.
+  Future<void> shutdown() async {
+    _gen++; // abandon any tune in progress
+    _retryTimer?.cancel();
+    _pollTimer?.cancel();
+    _sizeTimer?.cancel();
+    _captions?.dispose();
+    _captions = null;
+    _channel = null;
+    status.value = TuneStatus.idle;
+    try {
+      await player.stop();
+    } catch (_) {}
+    debugPrint('[player] stopped for exit');
+  }
+
   /// 0..100
   Future<void> setVolume(double v) => player.setVolume(v.clamp(0.0, 100.0).toDouble());
 
   Future<void> dispose() async {
     _retryTimer?.cancel();
     _pollTimer?.cancel();
+    _sizeTimer?.cancel();
     _captions?.dispose();
     for (final s in _subs) {
       await s.cancel();

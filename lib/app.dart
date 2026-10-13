@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show AppExitResponse;
 
 import 'package:flutter/foundation.dart' show kReleaseMode;
 import 'package:flutter/gestures.dart';
@@ -20,21 +21,23 @@ import 'ui/settings_panel.dart';
 import 'ui/theme.dart';
 
 class IptvApp extends StatelessWidget {
-  const IptvApp({super.key});
+  const IptvApp({super.key, this.hwAccel = true});
+  final bool hwAccel;
 
   @override
   Widget build(BuildContext context) => MaterialApp(
         title: 'IPTV Guide',
         debugShowCheckedModeBanner: false,
         theme: ThemeData.dark(useMaterial3: false),
-        home: const AppShell(),
+        home: AppShell(hwAccel: hwAccel),
       );
 }
 
 enum _Mode { starting, remoteSetup, loading, play, guide }
 
 class AppShell extends StatefulWidget {
-  const AppShell({super.key});
+  const AppShell({super.key, this.hwAccel = true});
+  final bool hwAccel;
 
   @override
   State<AppShell> createState() => _AppShellState();
@@ -88,12 +91,22 @@ class _AppShellState extends State<AppShell> {
   @override
   void initState() {
     super.initState();
-    _tv = TvPlayer();
+    _tv = TvPlayer(hwAccel: widget.hwAccel);
     _tv.onTuned = _recordTune;
     _tv.status.addListener(_onTvStatus);
     _tv.message.addListener(_onTvStatus);
     _tv.subtitle.addListener(_onTvStatus);
     _actionSub = InputManager.instance.actions.listen(_onAction);
+    // Window close / app exit: stop the stream cleanly first, so the server
+    // can end its session (State.dispose doesn't run when a desktop window
+    // is closed).
+    _lifecycle = AppLifecycleListener(
+      onExitRequested: () async {
+        await _shutdown();
+        return AppExitResponse.exit;
+      },
+      onDetach: () => _shutdown(),
+    );
     InputManager.instance.start();
     _progressTimer = Timer.periodic(const Duration(milliseconds: 200), (_) {
       if (mounted && _tv.status.value == TuneStatus.tuning) setState(() {});
@@ -103,6 +116,7 @@ class _AppShellState extends State<AppShell> {
 
   @override
   void dispose() {
+    _lifecycle.dispose();
     _actionSub?.cancel();
     for (final t in [_bannerTimer, _flipTimer, _epgTimer, _progressTimer, _digitTimer, _lingerTimer, _volumeTimer]) {
       t?.cancel();
@@ -110,6 +124,26 @@ class _AppShellState extends State<AppShell> {
     _tv.dispose();
     _rootFocus.dispose();
     super.dispose();
+  }
+
+  late final AppLifecycleListener _lifecycle;
+  bool _shutDown = false;
+
+  Future<void> _shutdown() async {
+    if (_shutDown) return;
+    _shutDown = true;
+    for (final t in [_epgTimer, _flipTimer]) {
+      t?.cancel();
+    }
+    try {
+      await _tv.shutdown().timeout(const Duration(seconds: 2));
+    } catch (_) {}
+  }
+
+  /// Exit from the Setup menu.
+  Future<void> _exit() async {
+    await _shutdown();
+    exitApp();
   }
 
   void _onTvStatus() {
@@ -422,6 +456,13 @@ class _AppShellState extends State<AppShell> {
               })
         ),
         (
+          'Hardware video acceleration:  ${_settings!.hwAccel ? 'ON' : 'OFF'}'
+              '${_settings!.hwAccel != widget.hwAccel ? '  (restart to apply)' : ''}',
+          () => setState(() {
+                _settings!.hwAccel = !_settings!.hwAccel;
+              })
+        ),
+        (
           'Animated guide transitions:  ${_settings!.animateGuide ? 'ON' : 'OFF'}',
           () => setState(() {
                 _settings!.animateGuide = !_settings!.animateGuide;
@@ -429,7 +470,7 @@ class _AppShellState extends State<AppShell> {
         ),
         ('Set up remote / controller', _remap),
         if (isDesktop) ('Toggle fullscreen', () => toggleFullscreen()),
-        if (canExit) ('Exit app', exitApp),
+        if (canExit) ('Exit app', _exit),
       ];
 
   void _openSettings(String msg) {
@@ -669,10 +710,9 @@ class _AppShellState extends State<AppShell> {
     );
   }
 
-  List<Widget> _layers() {
+  /// Canvas layers drawn under the video (the guide).
+  List<Widget> _belowLayers() {
     final layers = <Widget>[];
-    final watching = _mode == _Mode.play || _mode == _Mode.guide;
-
     if (_mode == _Mode.guide || _guideLinger) {
       layers.add(Positioned.fill(
         child: IgnorePointer(
@@ -693,21 +733,38 @@ class _AppShellState extends State<AppShell> {
         ),
       ));
     }
+    return layers;
+  }
 
-    // Video plus everything drawn on it (PIP label, tuning box) in one
-    // animated rect, so overlays follow the zoom into / out of the PIP.
-    if (_tv.channel != null) {
-      final inGuide = _mode == _Mode.guide;
-      final r = inGuide ? kPip : Offset.zero & kCanvas;
-      final toast = _toast();
-      layers.add(AnimatedPositioned(
+  /// The video, positioned in real screen pixels (snapped to whole pixels)
+  /// rather than inside the scaled 1920x1080 canvas: drawing the video
+  /// texture through a fractional scale transform leaves a thin diagonal
+  /// seam where its two triangles meet. Overlays on the video (PIP label,
+  /// tuning box) are scaled back to canvas units inside it, so they still
+  /// follow the zoom into / out of the PIP.
+  Widget? _videoLayer(double scale, Offset origin, double dpr) {
+    if (_tv.channel == null || scale <= 0) return null; // (0 while minimized)
+    final watching = _mode == _Mode.play || _mode == _Mode.guide;
+    final inGuide = _mode == _Mode.guide;
+    final r = inGuide ? kPip : Offset.zero & kCanvas;
+    // snap to whole *physical* pixels (display scaling can be 125%, 150%...)
+    double snap(double v) => (v * dpr).roundToDouble() / dpr;
+    final screen = Rect.fromLTRB(
+      snap(origin.dx + r.left * scale),
+      snap(origin.dy + r.top * scale),
+      snap(origin.dx + r.right * scale),
+      snap(origin.dy + r.bottom * scale),
+    );
+    // (Rendering at the exact on-screen size via VideoController.setSize was
+    // tried: it didn't remove the seam with GPU output, and with software
+    // output media_kit shows garbage lines after each resize. The seam is
+    // avoided by software output instead - see AppSettings.hwAccel.)
+    final toast = _toast();
+    return AnimatedPositioned.fromRect(
         key: const ValueKey('video'),
         duration: _anim,
         curve: Curves.easeInOut,
-        left: r.left,
-        top: r.top,
-        width: r.width,
-        height: r.height,
+        rect: screen,
         child: Offstage(
           offstage: !watching,
           child: GestureDetector(
@@ -725,29 +782,47 @@ class _AppShellState extends State<AppShell> {
               fit: StackFit.expand,
               children: [
                 Video(controller: _tv.controller, controls: NoVideoControls, fill: Colors.black),
-                if (inGuide || _guideLinger)
-                  Positioned(
-                    left: 0,
-                    right: 0,
-                    bottom: 0,
-                    height: 54,
-                    child: IgnorePointer(
-                      child: Container(
-                        color: const Color(0xCC3A64A0),
-                        padding: const EdgeInsets.symmetric(horizontal: 16),
-                        alignment: Alignment.centerLeft,
-                        child: CanvasText(_tv.channel!.label, size: 36, bold: true),
+                // overlays in canvas units, scaled to the video's on-screen size
+                IgnorePointer(
+                  child: LayoutBuilder(
+                    builder: (context, c) => FittedBox(
+                      fit: BoxFit.fill,
+                      child: SizedBox(
+                        width: c.maxWidth / scale,
+                        height: c.maxHeight / scale,
+                        child: Stack(
+                          fit: StackFit.expand,
+                          children: [
+                            if (inGuide || _guideLinger)
+                              Positioned(
+                                left: 0,
+                                right: 0,
+                                bottom: 0,
+                                height: 54,
+                                child: Container(
+                                  color: const Color(0xCC3A64A0),
+                                  padding: const EdgeInsets.symmetric(horizontal: 16),
+                                  alignment: Alignment.centerLeft,
+                                  child: CanvasText(_tv.channel!.label, size: 36, bold: true),
+                                ),
+                              ),
+                            if (toast != null) toast,
+                          ],
+                        ),
                       ),
                     ),
                   ),
-                if (toast != null) IgnorePointer(child: toast),
+                ),
               ],
             ),
           ),
         ),
-      ));
-    }
+      );
+  }
 
+  /// Canvas layers drawn over the video.
+  List<Widget> _aboveLayers() {
+    final layers = <Widget>[];
     final bch = _bannerChannel;
     if (_mode == _Mode.play && _banner && bch != null) {
       final (now, next) = _epg.nowNext(bch.key, DateTime.now().millisecondsSinceEpoch ~/ 1000);
@@ -822,6 +897,18 @@ class _AppShellState extends State<AppShell> {
     return layers;
   }
 
+  /// A 1920x1080 design canvas scaled to fit the window.
+  Widget _canvas(List<Widget> children) => Center(
+        child: FittedBox(
+          fit: BoxFit.contain,
+          child: SizedBox(
+            width: kCanvas.width,
+            height: kCanvas.height,
+            child: ClipRect(child: Stack(children: children)),
+          ),
+        ),
+      );
+
   @override
   Widget build(BuildContext context) {
     return PopScope(
@@ -843,16 +930,24 @@ class _AppShellState extends State<AppShell> {
           // draws its yellow "missing Material" debug underline).
           child: Material(
             color: Colors.black,
-            child: Center(
-              child: FittedBox(
-                fit: BoxFit.contain,
-                child: SizedBox(
-                  width: kCanvas.width,
-                  height: kCanvas.height,
-                  child: ClipRect(child: Stack(children: _layers())),
-                ),
-              ),
-            ),
+            child: LayoutBuilder(builder: (context, c) {
+              // same fit as the canvas FittedBoxes: contain, centered
+              final scale = (c.maxWidth / kCanvas.width) < (c.maxHeight / kCanvas.height)
+                  ? c.maxWidth / kCanvas.width
+                  : c.maxHeight / kCanvas.height;
+              final origin = Offset(
+                (c.maxWidth - kCanvas.width * scale) / 2,
+                (c.maxHeight - kCanvas.height * scale) / 2,
+              );
+              final video = _videoLayer(scale, origin, MediaQuery.of(context).devicePixelRatio);
+              return Stack(
+                children: [
+                  Positioned.fill(child: _canvas(_belowLayers())),
+                  if (video != null) video,
+                  Positioned.fill(child: _canvas(_aboveLayers())),
+                ],
+              );
+            }),
           ),
         ),
       ),

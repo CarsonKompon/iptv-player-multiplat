@@ -1,5 +1,6 @@
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/services.dart' show rootBundle;
 import 'package:shared_preferences/shared_preferences.dart';
 
@@ -59,6 +60,14 @@ class AppSettings {
   /// Learned: this server's channels play as .m3u8 rather than .ts.
   bool get preferHls => _prefs.getBool('preferHls') ?? false;
   set preferHls(bool v) => _prefs.setBool('preferHls', v);
+
+  /// GPU video output (read once at startup, see main.dart). Off by default
+  /// on Windows, where media_kit's GPU path draws a diagonal seam through
+  /// the picture on some GPUs/drivers.
+  static const hwAccelKey = 'hwAccel';
+  static bool get hwAccelDefault => kIsWeb || defaultTargetPlatform != TargetPlatform.windows;
+  bool get hwAccel => _prefs.getBool(hwAccelKey) ?? hwAccelDefault;
+  set hwAccel(bool v) => _prefs.setBool(hwAccelKey, v);
 
   /// Show subtitles when the stream offers them.
   bool get subtitles => _prefs.getBool('subtitles') ?? false;

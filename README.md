@@ -67,15 +67,45 @@ You can redo the wizard any time under **Setup → Set up remote / controller**.
    - **Web:** hls.js.
 3. Default URLs can go in `assets/config.json`, like the Roku version's `config.json`. URLs set in Setup override it until you change the file.
 
-### Building
+### Building release packages
+
+One command builds everything the current machine can build, into `dist/`:
 
 ```powershell
-flutter build windows              # build\windows\x64\runner\Release
-flutter build apk --release        # Android / Fire TV / Android TV
-flutter build macos
-flutter build linux                # needs: sudo apt install libmpv-dev mpv
-flutter build web                  # see web notes below
+.\build.ps1                               # Windows PC: windows + android + web
+.\build.ps1 -Platforms windows            # just Windows
+.\build.ps1 -Platforms windows,linux      # + Linux via WSL
+.\build.ps1 -SplitApk -Platforms android  # smaller per-CPU APKs
 ```
+```bash
+./build.sh                    # Mac: macos + android + web   |  Linux: linux + android + web
+./build.sh macos              # just some
+```
+
+| Package | Build on | Notes |
+|---|---|---|
+| `IPTVGuide-windows-x64.zip` | Windows | Unzip anywhere and run `iptv_guide.exe`. Keep the folder together. |
+| `IPTVGuide-android.apk` | Windows, Mac or Linux | Needs the Android SDK (Android Studio). Install with `adb install`. Signed with Flutter's debug key, which is fine for sideloading but not for the Play Store. |
+| `IPTVGuide-macos.zip` | Mac only | Needs Xcode. Unsigned, so right-click → Open the first time. |
+| `IPTVGuide-linux-x64.tar.gz` | Linux or WSL | Needs `clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev`. End users need `libmpv` installed. |
+| `IPTVGuide-web.zip` | Anywhere | A static site. See the web notes below. |
+
+Flutter can't cross-compile desktop apps, so each desktop OS has to be built on that OS. The one exception is Linux from Windows through **WSL**.
+
+#### Linux via WSL (one-time setup)
+
+```powershell
+wsl --install            # in an admin PowerShell, then reboot and create a Linux user
+```
+Then, inside the Ubuntu window:
+```bash
+sudo apt update
+sudo apt install -y git curl unzip xz-utils zip clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev
+git clone https://github.com/flutter/flutter.git -b stable ~/flutter
+echo 'export PATH="$HOME/flutter/bin:$PATH"' >> ~/.profile && source ~/.profile
+flutter doctor           # first run downloads the Dart SDK
+```
+After that, a plain `.\build.ps1` detects Flutter in WSL and builds the Linux package too.
 
 **Fire TV:** turn on Developer Options → ADB debugging, then `adb connect <fire-tv-ip>` and `adb install build\app\outputs\flutter-apk\app-release.apk`.
 
