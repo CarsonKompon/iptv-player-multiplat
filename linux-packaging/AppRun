@@ -1,0 +1,17 @@
+#!/bin/sh
+# AppImage entry point.
+HERE="$(dirname "$(readlink -f "$0")")"
+export APPDIR="${APPDIR:-$HERE}"
+
+# hooks installed by linuxdeploy plugins (GTK setup etc.)
+if [ -d "$APPDIR/apprun-hooks" ]; then
+  for hook in "$APPDIR"/apprun-hooks/*.sh; do
+    [ -f "$hook" ] && . "$hook"
+  done
+fi
+
+# media_kit loads libmpv with dlopen("libmpv.so.N"), so the bundled copy
+# (and its FFmpeg libraries) must be on the library search path.
+export LD_LIBRARY_PATH="$APPDIR/usr/lib:$APPDIR/usr/bin/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+exec "$APPDIR/usr/bin/iptv_guide" "$@"

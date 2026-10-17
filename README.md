@@ -87,7 +87,8 @@ One command builds everything the current machine can build, into `dist/`:
 | `IPTVGuide-windows-x64.zip` | Windows | Unzip anywhere and run `iptv_guide.exe`. Keep the folder together. |
 | `IPTVGuide-android.apk` | Windows, Mac or Linux | Needs the Android SDK (Android Studio). Install with `adb install`. Signed with Flutter's debug key, which is fine for sideloading but not for the Play Store. |
 | `IPTVGuide-macos.zip` | Mac only | Needs Xcode. Unsigned, so right-click → Open the first time. |
-| `IPTVGuide-linux-x64.tar.gz` | Linux or WSL | Needs `clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev`. End users need `libmpv` installed. |
+| `IPTVGuide-linux-x86_64.AppImage` | Linux or WSL | **Recommended for Linux users.** A single file with libmpv, FFmpeg and GTK bundled, so it works on immutable distros (Silverblue, Bazzite, SteamOS…). Run `chmod +x` on it, then run it. The build downloads `linuxdeploy` automatically. |
+| `IPTVGuide-linux-x64.tar.gz` | Linux or WSL | A plain folder. Needs `libmpv` installed on the system. To build either Linux package you need `clang cmake ninja-build pkg-config libgtk-3-dev libmpv-dev`. |
 | `IPTVGuide-web.zip` | Anywhere | A static site. See the web notes below. |
 
 Flutter can't cross-compile desktop apps, so each desktop OS has to be built on that OS. The one exception is Linux from Windows through **WSL**.

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=IPTV Guide
+Comment=Retro satellite-style IPTV player with a classic program guide
+Exec=iptv_guide
+Icon=iptv-guide
+Categories=AudioVideo;Video;Player;TV;
+Terminal=false

@@ -10,6 +10,7 @@
 #
 # Output (dist/):
 #   IPTVGuide-macos.zip            IPTV Guide.app
+#   IPTVGuide-linux-x86_64.AppImage   single file, libmpv bundled (works on immutable distros)
 #   IPTVGuide-linux-x64.tar.gz     run ./iptv_guide (needs libmpv: sudo apt install libmpv2 or libmpv1)
 #   IPTVGuide-android.apk
 #   IPTVGuide-web.zip
@@ -62,6 +63,63 @@ build_linux() {
   local arch
   arch=$(ls build/linux | head -n 1)   # x64 or arm64
   tar -C "build/linux/$arch/release" -czf "$DIST/IPTVGuide-linux-$arch.tar.gz" --transform 's,^bundle,IPTVGuide,' bundle
+  build_appimage "$arch" || return 1
+}
+
+# Single-file AppImage with libmpv (+ FFmpeg) and GTK bundled, for immutable
+# distros (Silverblue, Bazzite, SteamOS...) where libmpv can't be installed.
+build_appimage() {
+  local arch="$1" la
+  case "$arch" in
+    x64)   la=x86_64 ;;
+    arm64) la=aarch64 ;;
+    *) echo "AppImage: unsupported arch $arch"; return 1 ;;
+  esac
+  local tools="$PWD/build/tools" appdir="$PWD/build/AppDir"
+  mkdir -p "$tools"
+  local ld="$tools/linuxdeploy-$la.AppImage" gtk="$tools/linuxdeploy-plugin-gtk.sh"
+  if [ ! -x "$ld" ]; then
+    curl -fsSL -o "$ld" "https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-$la.AppImage" || return 1
+    chmod +x "$ld"
+  fi
+  if [ ! -x "$gtk" ]; then
+    curl -fsSL -o "$gtk" "https://raw.githubusercontent.com/linuxdeploy/linuxdeploy-plugin-gtk/master/linuxdeploy-plugin-gtk.sh" || return 1
+    chmod +x "$gtk"
+  fi
+
+  # libmpv isn't linked (media_kit dlopen()s it), so name it explicitly
+  local mpv
+  mpv=$(ldconfig -p | grep -o '/[^ ]*libmpv\.so\.[0-9]*$' | head -n 1)
+  [ -n "$mpv" ] || { echo "AppImage: libmpv not found (sudo apt install libmpv-dev)"; return 1; }
+
+  # icon: the 512px web icon from `flutter create`, else the Android one
+  local icon="$PWD/build/iptv-guide.png"
+  if [ -f web/icons/Icon-512.png ]; then cp web/icons/Icon-512.png "$icon"
+  elif [ -f android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png ]; then cp android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png "$icon"
+  else echo "AppImage: no icon found (run ./setup.sh)"; return 1; fi
+
+  rm -rf "$appdir"
+  mkdir -p "$appdir/usr/bin"
+  cp -r "build/linux/$arch/release/bundle/." "$appdir/usr/bin/"
+  # scripts may have Windows line endings if edited there
+  sed 's/\r$//' linux-packaging/AppRun > "$tools/AppRun" && chmod +x "$tools/AppRun"
+  sed 's/\r$//' linux-packaging/iptv-guide.desktop > "$tools/iptv-guide.desktop"
+
+  local out="$DIST/IPTVGuide-linux-$la.AppImage"
+  rm -f "$out"
+  # (APPIMAGE_EXTRACT_AND_RUN: run the tool without FUSE, e.g. in CI/containers)
+  ( export PATH="$tools:$PATH" APPIMAGE_EXTRACT_AND_RUN=1 ARCH="$la" OUTPUT="$out" LDAI_OUTPUT="$out" DEPLOY_GTK_VERSION=3
+    "$ld" --appdir "$appdir" \
+      --executable "$appdir/usr/bin/iptv_guide" \
+      --library "$mpv" \
+      --desktop-file "$tools/iptv-guide.desktop" \
+      --icon-file "$icon" \
+      --custom-apprun "$tools/AppRun" \
+      --plugin gtk \
+      --output appimage ) || return 1
+  [ -f "$out" ] || { echo "AppImage: linuxdeploy didn't produce $out"; return 1; }
+  chmod +x "$out"
+  echo "AppImage: $out"
 }
 
 build_android() {
